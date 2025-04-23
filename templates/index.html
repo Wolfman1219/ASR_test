@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Speech-to-Text Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        button {
+            margin: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .recording {
+            background-color: #f44336;
+        }
+        #result {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            width: 100%;
+            min-height: 100px;
+        }
+        .status {
+            margin: 10px 0;
+            font-style: italic;
+        }
+        .options {
+            margin: 15px 0;
+            width: 100%;
+        }
+        .options label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        .options input {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 15px;
+            box-sizing: border-box;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Speech-to-Text Demo</h1>
+        
+        <div class="options">
+            <label for="hotword">Hotword (optional):</label>
+            <input type="text" id="hotword" placeholder="Enter hotword...">
+        </div>
+        
+        <button id="recordButton">Start Recording</button>
+        <p class="status" id="status">Ready to record</p>
+        
+        <div id="result">
+            <p>Transcription will appear here...</p>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const recordButton = document.getElementById('recordButton');
+            const status = document.getElementById('status');
+            const result = document.getElementById('result');
+            const hotwordInput = document.getElementById('hotword');
+            
+            let mediaRecorder;
+            let audioChunks = [];
+            let isRecording = false;
+            
+            // Check if browser supports getUserMedia
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                status.textContent = 'Your browser does not support audio recording';
+                recordButton.disabled = true;
+                return;
+            }
+            
+            recordButton.addEventListener('click', function() {
+                if (!isRecording) {
+                    startRecording();
+                } else {
+                    stopRecording();
+                }
+            });
+            
+            async function startRecording() {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    
+                    mediaRecorder = new MediaRecorder(stream);
+                    audioChunks = [];
+                    
+                    mediaRecorder.addEventListener('dataavailable', event => {
+                        audioChunks.push(event.data);
+                    });
+                    
+                    mediaRecorder.addEventListener('stop', () => {
+                        sendAudioToServer();
+                    });
+                    
+                    mediaRecorder.start();
+                    isRecording = true;
+                    recordButton.textContent = 'Stop Recording';
+                    recordButton.classList.add('recording');
+                    status.textContent = 'Recording...';
+                } catch (err) {
+                    console.error('Error accessing microphone:', err);
+                    status.textContent = 'Error accessing microphone: ' + err.message;
+                }
+            }
+            
+            function stopRecording() {
+                if (mediaRecorder && isRecording) {
+                    mediaRecorder.stop();
+                    isRecording = false;
+                    recordButton.textContent = 'Start Recording';
+                    recordButton.classList.remove('recording');
+                    status.textContent = 'Processing audio...';
+                    
+                    // Stop all audio tracks
+                    mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                }
+            }
+            
+            function sendAudioToServer() {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                const formData = new FormData();
+                formData.append('audio', audioBlob, 'recording.wav');
+                
+                // Add hotword if specified
+                const hotword = hotwordInput.value.trim();
+                if (hotword) {
+                    formData.append('hotword', hotword);
+                }
+                
+                fetch('/transcribe', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Server error: ' + response.status);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.error) {
+                        result.innerHTML = `<p style="color: red;">Error: ${data.error}</p>`;
+                    } else {
+                        result.innerHTML = `<p>${data.transcription}</p>`;
+                    }
+                    status.textContent = 'Ready to record';
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    result.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+                    status.textContent = 'Error occurred';
+                });
+            }
+        });
+    </script>
+</body>
+</html>
