@@ -1,3 +1,4 @@
 funasr
 flask
 soundfile
+silero-vad

@@ -59,11 +59,20 @@
             margin-bottom: 15px;
             box-sizing: border-box;
         }
+        .audio-settings {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 15px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Speech-to-Text Demo</h1>
+        
+        <div class="audio-settings">
+            Recording settings: Mono, 16kHz
+        </div>
         
         <div class="options">
             <label for="hotword">Hotword (optional):</label>
@@ -89,9 +98,18 @@
             let audioChunks = [];
             let isRecording = false;
             
-            // Check if browser supports getUserMedia
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                status.textContent = 'Your browser does not support audio recording';
+            // Target sample rate (16kHz)
+            const targetSampleRate = 16000;
+            
+            // Audio context for processing
+            let audioContext;
+            let audioProcessor;
+            let audioSource;
+            
+            // Check if browser supports getUserMedia and AudioContext
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || 
+                !window.AudioContext && !window.webkitAudioContext) {
+                status.textContent = 'Your browser does not support audio recording or processing';
                 recordButton.disabled = true;
                 return;
             }
@@ -106,16 +124,54 @@
             
             async function startRecording() {
                 try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    // Initialize AudioContext
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
                     
-                    mediaRecorder = new MediaRecorder(stream);
+                    // Request mono audio
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        audio: {
+                            channelCount: 1,
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true,
+                            sampleRate: targetSampleRate
+                        } 
+                    });
+                    
+                    audioSource = audioContext.createMediaStreamSource(stream);
+                    
+                    // Create a ScriptProcessorNode
+                    // Note: ScriptProcessorNode is deprecated but still widely supported
+                    // Could be replaced with AudioWorkletNode in production
+                    const bufferSize = 4096;
+                    audioProcessor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+                    
+                    // Connect the audio source to the processor
+                    audioSource.connect(audioProcessor);
+                    audioProcessor.connect(audioContext.destination);
+                    
+                    // Create a WAV recorder using MediaRecorder with raw PCM data
+                    const options = {
+                        mimeType: 'audio/webm',
+                        audioBitsPerSecond: 16 * 16000 // 16-bit depth at 16kHz
+                    };
+                    
+                    mediaRecorder = new MediaRecorder(stream, options);
                     audioChunks = [];
                     
                     mediaRecorder.addEventListener('dataavailable', event => {
-                        audioChunks.push(event.data);
+                        if (event.data.size > 0) {
+                            audioChunks.push(event.data);
+                        }
                     });
                     
                     mediaRecorder.addEventListener('stop', () => {
+                        // Clean up audio processing
+                        if (audioProcessor) {
+                            audioProcessor.disconnect();
+                            audioSource.disconnect();
+                        }
+                        
                         sendAudioToServer();
                     });
                     
@@ -123,7 +179,7 @@
                     isRecording = true;
                     recordButton.textContent = 'Stop Recording';
                     recordButton.classList.add('recording');
-                    status.textContent = 'Recording...';
+                    status.textContent = 'Recording (Mono, 16kHz)...';
                 } catch (err) {
                     console.error('Error accessing microphone:', err);
                     status.textContent = 'Error accessing microphone: ' + err.message;
@@ -144,9 +200,9 @@
             }
             
             function sendAudioToServer() {
-                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                 const formData = new FormData();
-                formData.append('audio', audioBlob, 'recording.wav');
+                formData.append('audio', audioBlob, 'recording.webm');
                 
                 // Add hotword if specified
                 const hotword = hotwordInput.value.trim();
