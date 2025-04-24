@@ -131,9 +131,9 @@ app = Flask(__name__)
 
 # Initialize your model - update paths as needed
 model = AutoModel(
-    model="/opt/ai_users/abdurakhim/paraformer_train/checkpoints/paraformer_v1_old",
-    model_path="/opt/ai_users/abdurakhim/paraformer_train/checkpoints/paraformer_v1_old/model.pt.best", 
-    config_path="/opt/ai_users/abdurakhim/paraformer_train/checkpoints/paraformer_v1_old", 
+    model="/opt/ai_users/abdurakhim/paraformer_train/checkpoints/paraformer_uzbek_natural_v1",
+    model_path="/opt/ai_users/abdurakhim/paraformer_train/checkpoints/paraformer_uzbek_natural_v1/model.pt.best", 
+    config_path="/opt/ai_users/abdurakhim/paraformer_train/checkpoints/paraformer_uzbek_natural_v1", 
     config_name="config.yaml"
 )
 
