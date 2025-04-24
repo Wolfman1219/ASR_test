@@ -5,8 +5,124 @@ import soundfile as sf
 import numpy as np
 from funasr import AutoModel
 import subprocess
-import tempfile
 from silero_vad import VADIterator, load_silero_vad, read_audio, collect_chunks, get_speech_timestamps
+import kenlm
+
+import sys # For float('inf')
+
+lm_model_PATH = 'lm_word_based_3.arpa'
+VOCAB_PATH = 'vocab.txt'
+MAX_WORD_LENGTH = 20  # Maximum length of a word candidate
+OOV_LOG_PROB_PER_CHAR = -7.0 # Heuristic penalty (log10 probability per char) for OOV words.
+
+try:
+    lm_model = kenlm.Model(lm_model_PATH)
+    print(f"KenLM lm_model loaded successfully from {lm_model_PATH}")
+    print(f"lm_model Order: {lm_model.order}")
+except Exception as e:
+    print(f"Error loading KenLM lm_model from {lm_model_PATH}: {e}")
+    sys.exit(1)
+
+try:
+    with open(VOCAB_PATH) as f:
+        vocab = set(line.strip() for line in f if line.strip()) # Ensure no empty lines
+    print(f"Vocabulary loaded successfully from {VOCAB_PATH}. Size: {len(vocab)}")
+except Exception as e:
+    print(f"Error loading vocabulary from {VOCAB_PATH}: {e}")
+    sys.exit(1)
+
+def segment_optimized(text, max_word_length=MAX_WORD_LENGTH, oov_log_prob_per_char=OOV_LOG_PROB_PER_CHAR):
+    """
+    Segments text using KenLM with stateful scoring and OOV handling.
+
+    Args:
+        text (str): The input text string (without spaces).
+        max_word_length (int): Maximum length of candidate words.
+        oov_log_prob_per_char (float): Penalty (log10 prob per char) for OOV words.
+
+    Returns:
+        str: The best segmentation found, joined by spaces.
+    """
+    n = len(text)
+    if n == 0:
+        return ""
+
+    # DP table: Stores (min_neg_log_prob, previous_index) for reaching index i
+    # Initialize with infinity cost and -1 index
+    best_score = [(float('inf'), -1)] * (n + 1)
+    # DP table for KenLM states: Stores the KenLM state *after* processing the
+    best_state = [None] * (n + 1)
+    # Base case: Start of sequence
+    best_score[0] = (0.0, -1) # Cost 0 at index 0
+    # Initialize with NullContext state (or BeginSentence if you want <s>)
+    # NullContext is usually preferred for segmentation within a larger text.
+    initial_state = kenlm.State()
+    lm_model.NullContextWrite(initial_state)
+    best_state[0] = initial_state
+    # --- Dynamic Programming ---
+    for i in range(1, n + 1):
+        # Iterate through possible start positions k for a word ending at i
+        for k in range(max(0, i - max_word_length), i):
+            word = text[k:i].lower() # Convert to lowercase for case-insensitive matching
+            prev_neg_log_prob, _ = best_score[k]
+
+            # If the previous state is unreachable, skip
+            if prev_neg_log_prob == float('inf'):
+                continue
+
+            prev_lm_state = best_state[k]
+            current_neg_log_prob = float('inf')
+            # word_id = -1 # Placeholder
+            # Check if word is in vocabulary
+            if word in vocab:
+                try:
+                    # Use BaseScore for stateful scoring
+                    # It calculates the log10 prob of 'word' given 'prev_lm_state'
+                    # and updates the state accordingly into 'current_lm_state'.
+                    current_lm_state = kenlm.State()
+                    log10_prob = lm_model.BaseScore(prev_lm_state, word, current_lm_state)
+                    word_neg_log_prob = -log10_prob
+                    current_neg_log_prob = prev_neg_log_prob + word_neg_log_prob
+                except KeyError:
+                    # Should not happen if word is in vocab set, but good practice
+                    # Fall through to OOV handling below
+                    print(f"Warning: Word '{word}' in vocab but not found by model. Treating as OOV.")
+            # Handle OOV words (if not found in vocab or if BaseScore failed)
+            if current_neg_log_prob == float('inf'): # Trigger OOV if not handled above
+                     # Use the <unk> token score and add a length-based penalty
+                     current_lm_state = kenlm.State()
+                     log10_prob_unk = lm_model.BaseScore(prev_lm_state, "<unk>", current_lm_state) # Score using <unk> contextually
+                     # Add heuristic penalty based on length
+                     oov_penalty = - (len(word) * oov_log_prob_per_char) # Penalty is positive cost
+                     word_neg_log_prob = -log10_prob_unk + oov_penalty
+                     current_neg_log_prob = prev_neg_log_prob + word_neg_log_prob
+                   # word_id = UNK_ID # Mark as OOV using the model's <unk> id for state tracking
+                   # print(f"  -> OOV Word: '{word}', PrevCost: {prev_neg_log_prob:.2f}, WordCost: {word_neg_log_prob:.2f} (unk={-log10_prob_unk:.2f}, penalty={oov_penalty:.2f}), NewTotal: {current_neg_log_prob:.2f}")
+            # Update DP table if this path is better
+            if current_neg_log_prob < best_score[i][0]:
+                best_score[i] = (current_neg_log_prob, k)
+                best_state[i] = current_lm_state
+                # print(f"  ** Update best_score[{i}]: Cost={current_neg_log_prob:.2f}, PrevIdx={k}")
+
+    # --- Backtracking ---
+    if best_score[n][0] == float('inf'):
+        print("Warning: Could not find a valid segmentation for the input.")
+        # Fallback: return the original text or handle error appropriately
+        return text # Or perhaps raise an error or return ""
+    segmented_words = []
+    current_index = n
+    while current_index > 0:
+        neg_log_prob, prev_index = best_score[current_index]
+        word = text[prev_index:current_index]
+        segmented_words.append(word)
+        current_index = prev_index
+    # Reverse the words to get the correct order
+    segmented_words.reverse()
+    print(segmented_words)
+    return ' '.join(segmented_words).lower()
+
+
+
 
 vad_model = load_silero_vad()
 SAMPLING_RATE = 16000
@@ -74,8 +190,8 @@ def transcribe():
         
         # Get the transcription result
         transcription = result[0]['text']
-        
-        return jsonify({'transcription': transcription})
+        segemented_text = segment_optimized(transcription)
+        return jsonify({'transcription': segemented_text})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
     finally:
