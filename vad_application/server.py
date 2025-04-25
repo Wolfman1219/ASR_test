@@ -1,12 +1,8 @@
 # server.py
-import io
-import time
 import numpy as np
 import torch
 import grpc
 from concurrent import futures
-import threading
-import queue
 
 # Import the generated protobuf code
 import vad_pb2
@@ -15,8 +11,7 @@ import vad_pb2_grpc
 # Configure Silero VAD
 torch.set_num_threads(1)
 model, utils = torch.hub.load(repo_or_dir='snakers4/silero-vad',
-                             model='silero_vad',
-                             force_reload=True)
+                             model='silero_vad')
 
 (get_speech_timestamps,
  save_audio,

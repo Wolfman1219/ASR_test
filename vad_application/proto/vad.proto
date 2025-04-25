@@ -1,7 +1,8 @@
 // vad.proto
 syntax = "proto3";
 
-package vad;
+ package vad;
+option go_package = "./vad_application";
 
 // VAD service definition
 service VADService {

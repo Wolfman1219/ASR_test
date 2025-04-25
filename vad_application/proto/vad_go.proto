@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package vad;
+option go_package = "proto/vad;vad"; // 👈 this is the fix
+
+service VADService {
+  rpc ProcessAudio (stream AudioChunk) returns (stream VADResponse);
+}
+
+message AudioChunk {
+  bytes audio_data = 1;
+}
+
+message VADResponse {
+  string event = 1;
+  string message = 2;
+}

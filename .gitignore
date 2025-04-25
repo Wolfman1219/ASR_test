@@ -1,4 +1,6 @@
-uploads/*
+uploads/
 */*.wav
 */*.webm
 env/
+*/__pycache__/
+vad_application/go.sum
