@@ -1,1 +1,4 @@
 uploads/*
+*/*.wav
+*/*.webm
+env/
