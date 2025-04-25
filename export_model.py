@@ -89,7 +89,7 @@ class ConformerEncoderExport(nn.Module):
         }
 
 
-print(tables.encoder_classes)
+# print(tables.encoder_classes)
 model = AutoModel(
     model="/opt/ai_users/abdurakhim/paraformer_train/checkpoints/paraformer_uzbek_natural_v1",
     model_path="/opt/ai_users/abdurakhim/paraformer_train/checkpoints/paraformer_uzbek_natural_v1/model.pt.best", 
@@ -97,9 +97,8 @@ model = AutoModel(
     config_name="config.yaml"
 )
 
-# result = model.generate(
-#             input="/opt/ai_users/abdurakhim/paraformer_train/test.wav",
-#             batch_size_s=300
-#         )
-# print(result)
-res = model.export(type="onnx", quantize=False, opset_version=20, predictor="CifPredictorV2",device='cpu')
+result = model.generate(
+            input="/opt/ai_users/abdurakhim/paraformer_train/test.wav",
+            batch_size_s=300
+        )
+# res = model.export(type="onnx", quantize=False, opset_version=20, predictor="CifPredictorV2",device='cpu')

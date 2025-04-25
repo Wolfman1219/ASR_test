@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-time VAD Demo</title>
+    <script src="https://unpkg.com/@grpc/grpc-web@1.4.2/index.js"></script>
+    <script src="/static/vad_grpc_web_pb.js"></script>
+    <script src="/static/vad_pb.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #status {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            min-height: 100px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Real-time Voice Activity Detection</h1>
+    <button id="startBtn">Start VAD</button>
+    <button id="stopBtn" disabled>Stop VAD</button>
+    <button id="resetBtn">Reset VAD</button>
+    <div id="status">Status: Idle</div>
+
+    <script>
+        const { AudioChunk, ResetRequest } = Vad;
+        const { VADServiceClient } = Vad.VADService;
+        
+        const client = new VADServiceClient('http://localhost:8080', null, null);
+        let stream = null;
+        let mediaStream = null;
+        const SAMPLE_RATE = 16000;
+        const VAD_CHUNK_SIZE = 512; // 512 samples at 16kHz
+        const statusDiv = document.getElementById('status');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const resetBtn = document.getElementById('resetBtn');
+
+        async function startVAD() {
+            try {
+                // Get microphone access
+                mediaStream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: { 
+                        sampleRate: SAMPLE_RATE,
+                        channelCount: 1,
+                        sampleSize: 16
+                    }
+                });
+
+                // Set up Web Audio API
+                const audioContext = new AudioContext({ sampleRate: SAMPLE_RATE });
+                const source = audioContext.createMediaStreamSource(mediaStream);
+                const processor = audioContext.createScriptProcessor(VAD_CHUNK_SIZE, 1, 1);
+
+                processor.onaudioprocess = (e) => {
+                    if (!stream) return;
+                    
+                    // Convert float samples to 16-bit PCM
+                    const inputData = e.inputBuffer.getChannelData(0);
+                    const buffer = new ArrayBuffer(VAD_CHUNK_SIZE * 2);
+                    const view = new DataView(buffer);
+                    
+                    for (let i = 0; i < VAD_CHUNK_SIZE; i++) {
+                        const sample = Math.max(-1, Math.min(1, inputData[i]));
+                        view.setInt16(i * 2, sample * 0x7FFF, true);
+                    }
+
+                    // Send audio chunk to server
+                    const chunk = new AudioChunk();
+                    chunk.setAudioData(new Uint8Array(buffer));
+                    stream.send(chunk);
+                };
+
+                // Set up gRPC-Web stream
+                stream = client.processAudio((err, response) => {
+                    if (err) {
+                        console.error('Stream error:', err);
+                        updateStatus(`Error: ${err.message}`);
+                        return;
+                    }
+                    if (response) {
+                        updateStatus(`VAD Event: ${response.getEvent()} - ${response.getMessage()}`);
+                    }
+                });
+
+                // Connect audio processing
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+
+                // Update UI
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                updateStatus('VAD Started');
+            } catch (err) {
+                console.error('Error starting VAD:', err);
+                updateStatus(`Error: ${err.message}`);
+            }
+        }
+
+        function stopVAD() {
+            if (stream) {
+                stream.close();
+                stream = null;
+            }
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+            }
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            updateStatus('VAD Stopped');
+        }
+
+        async function resetVAD() {
+            try {
+                const request = new ResetRequest();
+                client.resetVAD(request, {}, (err, response) => {
+                    if (err) {
+                        console.error('Reset error:', err);
+                        updateStatus(`Reset Error: ${err.message}`);
+                        return;
+                    }
+                    updateStatus('VAD Reset Successful');
+                });
+            } catch (err) {
+                console.error('Error resetting VAD:', err);
+                updateStatus(`Reset Error: ${err.message}`);
+            }
+        }
+
+        function updateStatus(message) {
+            statusDiv.innerText = `Status: ${message}`;
+        }
+
+        startBtn.addEventListener('click', startVAD);
+        stopBtn.addEventListener('click', stopVAD);
+        resetBtn.addEventListener('click', resetVAD);
+    </script>
+</body>
+</html>

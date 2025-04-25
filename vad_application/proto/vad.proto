@@ -1,0 +1,32 @@
+// vad.proto
+syntax = "proto3";
+
+package vad;
+
+// VAD service definition
+service VADService {
+  // Process streaming audio and get VAD events
+  rpc ProcessAudio (stream AudioChunk) returns (stream VADResponse);
+  
+  // Reset VAD state
+  rpc ResetVAD (ResetRequest) returns (ResetResponse);
+}
+
+// Audio chunk containing raw audio data
+message AudioChunk {
+  bytes audio_data = 1;
+}
+
+// VAD response with event type and message
+message VADResponse {
+  string event = 1;  // "start", "continue", or "end"
+  string message = 2;
+}
+
+// Request to reset VAD state
+message ResetRequest {}
+
+// Response from reset request
+message ResetResponse {
+  bool success = 1;
+}
